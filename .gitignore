@@ -1,0 +1,8 @@
+.env
+seen_posts.db
+linkedin_alerts.log
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
