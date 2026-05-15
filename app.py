@@ -2,6 +2,7 @@
 Combined web dashboard + background scheduler.
 Open in browser (or iPhone Safari) to control the app.
 """
+import json
 import logging
 import os
 import threading
@@ -29,10 +30,8 @@ app = Flask(__name__)
 
 REQUIRED_VARS = [
     "SERPER_API_KEY",
-    "SMTP_HOST",
-    "SMTP_USER",
-    "SMTP_PASSWORD",
-    "EMAIL_TO",
+    "TELEGRAM_TOKEN",
+    "TELEGRAM_CHAT_ID",
 ]
 
 # In-memory status
@@ -229,6 +228,38 @@ def run_now():
 @app.route("/health")
 def health():
     return jsonify({"status": "ok"}), 200
+
+
+@app.route("/setup-telegram")
+def setup_telegram():
+    """Fetch recent Telegram updates to find your chat ID."""
+    token = os.environ.get("TELEGRAM_TOKEN", "")
+    if not token:
+        return "Stel eerst TELEGRAM_TOKEN in via Railway Variables.", 400
+    try:
+        import urllib.request as _req
+        with _req.urlopen(
+            f"https://api.telegram.org/bot{token}/getUpdates", timeout=10
+        ) as resp:
+            data = json.loads(resp.read())
+    except Exception as exc:
+        return f"Fout: {exc}", 500
+
+    results = data.get("result", [])
+    if not results:
+        return (
+            "Geen berichten gevonden. Stuur eerst een bericht naar je bot in Telegram "
+            "en laad deze pagina daarna opnieuw."
+        ), 200
+
+    chat_id = results[-1]["message"]["chat"]["id"]
+    name = results[-1]["message"]["chat"].get("first_name", "")
+    return (
+        f"<h2>Jouw chat ID: <code>{chat_id}</code></h2>"
+        f"<p>Naam: {name}</p>"
+        f"<p>Voeg toe in Railway Variables:<br>"
+        f"<code>TELEGRAM_CHAT_ID = {chat_id}</code></p>"
+    ), 200
 
 
 @app.route("/diagnose")
