@@ -94,11 +94,19 @@ def scrape_posts(lookback_hours: int = 12) -> list[dict]:
     Search LinkedIn for recent branding/webdesign posts in NL + BE.
     Returns a list of post dicts, deduplicated by URN.
     """
-    email = os.environ["LINKEDIN_EMAIL"]
-    password = os.environ["LINKEDIN_PASSWORD"]
-
-    logger.info("Inloggen bij LinkedIn…")
-    api = Linkedin(email, password)
+    li_at = os.environ.get("LINKEDIN_LI_AT")
+    if li_at:
+        logger.info("Inloggen bij LinkedIn via cookie…")
+        api = Linkedin("", "", cookies={"li_at": li_at})
+    else:
+        email = os.environ.get("LINKEDIN_EMAIL", "")
+        password = os.environ.get("LINKEDIN_PASSWORD", "")
+        if not email or not password:
+            raise RuntimeError(
+                "Stel LINKEDIN_LI_AT (aanbevolen) of LINKEDIN_EMAIL + LINKEDIN_PASSWORD in."
+            )
+        logger.info("Inloggen bij LinkedIn via e-mail/wachtwoord…")
+        api = Linkedin(email, password)
 
     cutoff = datetime.now(tz=timezone.utc).timestamp() - lookback_hours * 3600
     seen_urns: set[str] = set()
