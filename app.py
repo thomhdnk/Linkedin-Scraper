@@ -27,6 +27,15 @@ logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 
+REQUIRED_VARS = [
+    "LINKEDIN_EMAIL",
+    "LINKEDIN_PASSWORD",
+    "SMTP_HOST",
+    "SMTP_USER",
+    "SMTP_PASSWORD",
+    "EMAIL_TO",
+]
+
 # In-memory status
 _status = {
     "running": False,
@@ -61,7 +70,8 @@ DASHBOARD = """<!DOCTYPE html>
   .stat { display: flex; align-items: center; gap: 12px; padding: 8px 0;
           border-bottom: 1px solid #f0f0f0; }
   .stat:last-child { border-bottom: none; }
-  .stat-label { font-size: 13px; color: #555; flex: 1; }
+  .stat-label { font-size: 13px; color: #555; flex: 1; font-family: monospace; }
+  .stat-label-plain { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
   .stat-value { font-size: 14px; font-weight: 600; color: #191919; }
 
   .badge { display: inline-block; padding: 3px 10px; border-radius: 12px;
@@ -77,11 +87,12 @@ DASHBOARD = """<!DOCTYPE html>
          cursor: pointer; text-align: center; text-decoration: none;
          margin-top: 6px; }
   .btn:active { background: #094e9e; }
-  .btn-gray { background: #6b7280; }
   .btn:disabled { background: #93c5fd; cursor: not-allowed; }
 
-  .error { background: #fee2e2; border-left: 3px solid #ef4444;
-           padding: 10px 14px; border-radius: 4px; font-size: 13px; color: #7f1d1d; }
+  .alert { padding: 12px 14px; border-radius: 6px; font-size: 13px;
+           margin-bottom: 14px; line-height: 1.5; }
+  .alert-red  { background: #fee2e2; border-left: 3px solid #ef4444; color: #7f1d1d; }
+  .alert-yellow { background: #fef9c3; border-left: 3px solid #eab308; color: #713f12; }
 
   .history-item { padding: 10px 0; border-bottom: 1px solid #f0f0f0; }
   .history-item:last-child { border-bottom: none; }
@@ -98,25 +109,30 @@ DASHBOARD = """<!DOCTYPE html>
 </header>
 <main>
 
+  {% if missing_vars %}
+  <div class="alert alert-yellow">
+    <strong>⚠️ Ontbrekende instellingen</strong><br>
+    Ga in Railway naar <em>Variables</em> en voeg toe:<br><br>
+    {% for v in missing_vars %}<code>{{ v }}</code><br>{% endfor %}
+  </div>
+  {% endif %}
+
   {% if status.error %}
-  <div class="error">⚠️ Fout bij laatste run: {{ status.error }}</div>
-  <br>
+  <div class="alert alert-red"><strong>Fout bij laatste run:</strong><br>{{ status.error }}</div>
   {% endif %}
 
   <div class="card">
     <h2>Status</h2>
     <div class="stat">
-      <span class="stat-label">Scheduler</span>
-      <span class="stat-value">
-        <span class="badge badge-green">Actief</span>
-      </span>
+      <span class="stat-label stat-label-plain">Scheduler</span>
+      <span class="stat-value"><span class="badge badge-green">Actief</span></span>
     </div>
     <div class="stat">
-      <span class="stat-label">Laatste run</span>
+      <span class="stat-label stat-label-plain">Laatste run</span>
       <span class="stat-value">{{ status.last_run or '—' }}</span>
     </div>
     <div class="stat">
-      <span class="stat-label">Posts gevonden</span>
+      <span class="stat-label stat-label-plain">Posts gevonden</span>
       <span class="stat-value">
         {% if status.last_count is not none %}
           <span class="badge badge-blue">{{ status.last_count }} nieuw</span>
@@ -124,9 +140,25 @@ DASHBOARD = """<!DOCTYPE html>
       </span>
     </div>
     <div class="stat">
-      <span class="stat-label">Volgende runs</span>
+      <span class="stat-label stat-label-plain">Volgende runs</span>
       <span class="stat-value">{{ status.next_runs | join(', ') or '—' }}</span>
     </div>
+  </div>
+
+  <div class="card">
+    <h2>Instellingen</h2>
+    {% for var, ok in config_status %}
+    <div class="stat">
+      <span class="stat-label">{{ var }}</span>
+      <span class="stat-value">
+        {% if ok %}
+          <span class="badge badge-green">✓ Ingesteld</span>
+        {% else %}
+          <span class="badge badge-red">✗ Ontbreekt</span>
+        {% endif %}
+      </span>
+    </div>
+    {% endfor %}
   </div>
 
   <div class="card">
@@ -134,7 +166,9 @@ DASHBOARD = """<!DOCTYPE html>
     <p style="font-size:13px;color:#555;margin-bottom:14px;">
       Voer direct een scrape uit en ontvang de e-mail op je iPhone.
     </p>
-    {% if status.running %}
+    {% if missing_vars %}
+      <button class="btn" disabled>Stel eerst alle variabelen in</button>
+    {% elif status.running %}
       <button class="btn running-spinner" disabled>Bezig met scrapen…</button>
     {% else %}
       <form method="POST" action="/run-now">
@@ -157,7 +191,6 @@ DASHBOARD = """<!DOCTYPE html>
 
 </main>
 <script>
-  // Auto-refresh pagina elke 10s als er een run bezig is
   {% if status.running %}
   setTimeout(() => location.reload(), 5000);
   {% endif %}
@@ -167,15 +200,28 @@ DASHBOARD = """<!DOCTYPE html>
 
 # ── Routes ────────────────────────────────────────────────────────────────────
 
+def _config_status():
+    return [(v, bool(os.environ.get(v))) for v in REQUIRED_VARS]
+
+def _missing_vars():
+    return [v for v in REQUIRED_VARS if not os.environ.get(v)]
+
+
 @app.route("/")
 def index():
     history = tracker.get_run_history(limit=10)
-    return render_template_string(DASHBOARD, status=_status, history=history)
+    return render_template_string(
+        DASHBOARD,
+        status=_status,
+        history=history,
+        config_status=_config_status(),
+        missing_vars=_missing_vars(),
+    )
 
 
 @app.route("/run-now", methods=["POST"])
 def run_now():
-    if not _status["running"]:
+    if not _status["running"] and not _missing_vars():
         t = threading.Thread(target=_run_job, daemon=True)
         t.start()
     return redirect(url_for("index"))
@@ -189,6 +235,11 @@ def health():
 # ── Job logic ─────────────────────────────────────────────────────────────────
 
 def _run_job():
+    missing = _missing_vars()
+    if missing:
+        _status["error"] = f"Ontbrekende variabelen: {', '.join(missing)}"
+        return
+
     _status["running"] = True
     _status["error"] = None
     lookback = int(os.environ.get("LOOKBACK_HOURS", "12"))
@@ -211,9 +262,8 @@ def _run_job():
 
 
 def _update_next_runs():
-    jobs = schedule.get_jobs()
     upcoming = []
-    for j in jobs:
+    for j in schedule.get_jobs():
         if j.next_run:
             upcoming.append(j.next_run.strftime("%H:%M"))
     _status["next_runs"] = upcoming
@@ -234,8 +284,7 @@ def _start_scheduler():
             schedule.run_pending()
             time.sleep(30)
 
-    t = threading.Thread(target=loop, daemon=True)
-    t.start()
+    threading.Thread(target=loop, daemon=True).start()
 
 
 # ── Entry point ────────────────────────────────────────────────────────────────
