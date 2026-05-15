@@ -28,8 +28,7 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__)
 
 REQUIRED_VARS = [
-    "LINKEDIN_LI_AT",
-    "LINKEDIN_JSESSIONID",
+    "SERPER_API_KEY",
     "SMTP_HOST",
     "SMTP_USER",
     "SMTP_PASSWORD",
