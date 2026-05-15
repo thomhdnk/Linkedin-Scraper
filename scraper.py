@@ -95,9 +95,10 @@ def scrape_posts(lookback_hours: int = 12) -> list[dict]:
     Returns a list of post dicts, deduplicated by URN.
     """
     li_at = os.environ.get("LINKEDIN_LI_AT")
+    jsessionid = os.environ.get("LINKEDIN_JSESSIONID", "")
     if li_at:
         logger.info("Inloggen bij LinkedIn via cookie…")
-        api = Linkedin("", "", cookies={"li_at": li_at})
+        api = Linkedin("", "", cookies={"li_at": li_at, "JSESSIONID": jsessionid})
     else:
         email = os.environ.get("LINKEDIN_EMAIL", "")
         password = os.environ.get("LINKEDIN_PASSWORD", "")
