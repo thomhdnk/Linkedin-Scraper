@@ -231,6 +231,44 @@ def health():
     return jsonify({"status": "ok"}), 200
 
 
+@app.route("/diagnose")
+def diagnose():
+    """Test each external connection independently — open in Safari to debug."""
+    import smtplib
+    results = {}
+
+    # Test 1: outbound HTTPS via Serper.dev
+    try:
+        import json as _json
+        import urllib.request as _req
+        payload = _json.dumps({"q": "test", "num": 1}).encode()
+        r = _req.Request(
+            "https://google.serper.dev/search",
+            data=payload,
+            headers={
+                "X-API-KEY": os.environ.get("SERPER_API_KEY", ""),
+                "Content-Type": "application/json",
+            },
+        )
+        with _req.urlopen(r, timeout=10) as resp:
+            results["serper_https"] = f"OK (HTTP {resp.status})"
+    except Exception as exc:
+        results["serper_https"] = f"FOUT: {exc}"
+
+    # Test 2: outbound SMTP port 587
+    try:
+        smtp_host = os.environ.get("SMTP_HOST", "smtp.gmail.com")
+        smtp_port = int(os.environ.get("SMTP_PORT", "587"))
+        with smtplib.SMTP(smtp_host, smtp_port, timeout=10) as s:
+            s.ehlo()
+            s.starttls()
+        results["smtp_587"] = "OK (verbinding geslaagd)"
+    except Exception as exc:
+        results["smtp_587"] = f"FOUT: {exc}"
+
+    return jsonify(results)
+
+
 # ── Job logic ─────────────────────────────────────────────────────────────────
 
 def _run_job():
@@ -245,6 +283,15 @@ def _run_job():
 
     try:
         posts = scrape_posts(lookback_hours=lookback)
+    except Exception as exc:
+        logger.error("Scraper mislukt: %s", exc)
+        _status["error"] = f"Zoeken mislukt: {exc}"
+        _status["running"] = False
+        _status["last_run"] = datetime.now().strftime("%d %b %Y, %H:%M")
+        _update_next_runs()
+        return
+
+    try:
         new_posts = [p for p in posts if tracker.is_new(p["urn"])]
         send_digest(new_posts, lookback_hours=lookback)
         tracker.mark_seen([p["urn"] for p in new_posts])
@@ -252,8 +299,8 @@ def _run_job():
         tracker.cleanup_old(days=30)
         _status["last_count"] = len(new_posts)
     except Exception as exc:
-        logger.error("Job mislukt: %s", exc)
-        _status["error"] = str(exc)
+        logger.error("E-mail versturen mislukt: %s", exc)
+        _status["error"] = f"E-mail versturen mislukt: {exc}"
     finally:
         _status["running"] = False
         _status["last_run"] = datetime.now().strftime("%d %b %Y, %H:%M")
