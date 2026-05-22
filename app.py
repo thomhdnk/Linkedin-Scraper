@@ -30,8 +30,8 @@ app = Flask(__name__)
 
 REQUIRED_VARS = [
     "SERPER_API_KEY",
-    "TELEGRAM_TOKEN",
-    "TELEGRAM_CHAT_ID",
+    "RESEND_API_KEY",
+    "EMAIL_TO",
 ]
 
 # In-memory status
